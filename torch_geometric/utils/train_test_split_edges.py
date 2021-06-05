@@ -23,15 +23,11 @@ def train_test_split_edges(data, val_ratio=0.05, test_ratio=0.1):
 
     num_nodes = data.num_nodes
     row, col = data.edge_index
-    attr = data.edge_attr
     data.edge_index = None
 
     # Return upper triangular portion.
     mask = row < col
     row, col = row[mask], col[mask]
-
-    if attr is not None:
-      attr = attr[mask]
 
     n_v = int(math.floor(val_ratio * row.size(0)))
     n_t = int(math.floor(test_ratio * row.size(0)))
@@ -39,29 +35,26 @@ def train_test_split_edges(data, val_ratio=0.05, test_ratio=0.1):
     # Positive edges.
     perm = torch.randperm(row.size(0))
     row, col = row[perm], col[perm]
-    if attr is not None:
-      attr = attr[perm]
 
     r, c = row[:n_v], col[:n_v]
     data.val_pos_edge_index = torch.stack([r, c], dim=0)
-    if attr is not None:
-      a = attr[:n_v]
-      data.val_pos_edge_attr = a
 
     r, c = row[n_v:n_v + n_t], col[n_v:n_v + n_t]
     data.test_pos_edge_index = torch.stack([r, c], dim=0)
-    if attr is not None:
-      a = attr[n_v:n_v + n_t]
-      data.test_pos_edge_attr = a
 
     r, c = row[n_v + n_t:], col[n_v + n_t:]
     data.train_pos_edge_index = torch.stack([r, c], dim=0)
-    if attr is not None:
-      a = attr[n_v + n_t:]
-      data.train_pos_edge_index, data.train_pos_edge_attr = to_undirected(data.train_pos_edge_index, a)
+
+    if data.edge_attr is not None:
+        attr = data.edge_attr[mask]
+        attr = attr[perm]
+        data.val_pos_edge_attr = attr[:n_v]
+        data.test_pos_edge_attr = attr[n_v:n_v + n_t]
+        data.train_pos_edge_index, data.train_pos_edge_attr = to_undirected(
+            data.train_pos_edge_index, attr[n_v + n_t:])
     else:
-      data.train_pos_edge_index = to_undirected(data.train_pos_edge_index)
-   
+        data.train_pos_edge_index = to_undirected(data.train_pos_edge_index)
+
     # Negative edges.
     neg_adj_mask = torch.ones(num_nodes, num_nodes, dtype=torch.uint8)
     neg_adj_mask = neg_adj_mask.triu(diagonal=1).to(torch.bool)
