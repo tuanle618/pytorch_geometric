@@ -9,8 +9,12 @@ def test_train_test_split_edges():
                                [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]])
     data = Data(edge_index=edge_index)
     data.num_nodes = edge_index.max().item() + 1
+    data.edge_attr = torch.rand(edge_index.shape[1])
     data = train_test_split_edges(data, val_ratio=0.2, test_ratio=0.3)
 
+    assert data.val_pos_edge_attr.shape[0] == data.val_pos_edge_index.shape[1]
+    assert data.test_pos_edge_attr.shape[0] == data.test_pos_edge_index.shape[1]
+    assert data.train_pos_edge_attr.shape[0] == data.train_pos_edge_index.shape[1]
     assert data.val_pos_edge_index.size() == (2, 2)
     assert data.val_neg_edge_index.size() == (2, 2)
     assert data.test_pos_edge_index.size() == (2, 3)
