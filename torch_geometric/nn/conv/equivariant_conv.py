@@ -9,7 +9,7 @@ from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.nn.inits import reset
 
 
-def get_fully_connected_get_edges(n_nodes: int, add_self_loops: bool = False) -> Tensor:
+def get_fully_connected_edges(n_nodes: int, add_self_loops: bool = False) -> Tensor:
     """
     Creates the edge_index in COO format in a fully-connected graph with :obj:`n_nodes` nodes.
     """
@@ -27,7 +27,7 @@ def get_fully_connected_edges_in_batch(batch_num_nodes: Tensor, ptr: Tensor,
     """
     Creates the edge_index in COO format in a fully-connected graph in a batch
     """
-    fc_edge_index = [get_fully_connected_get_edges(int(n), add_self_loops) + int(p) for n, p in zip(batch_num_nodes, ptr)]
+    fc_edge_index = [get_fully_connected_edges(int(n), add_self_loops) + int(p) for n, p in zip(batch_num_nodes, ptr)]
     fc_edge_index = torch.cat(fc_edge_index, dim=-1)
 
     # create dictionary with string as keys, e.g. [0, 1] meaning the connectivity between source node_id 0 to 1
