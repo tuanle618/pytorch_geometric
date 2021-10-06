@@ -9,11 +9,13 @@ from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.nn.inits import reset
 
 
-def get_fully_connected_edges(n_nodes: int, add_self_loops: bool = False) -> Tensor:
+def get_fully_connected_edges(n_nodes: int,
+                              add_self_loops: bool = False) -> Tensor:
     """
     Creates the edge_index in COO format in a fully-connected graph with :obj:`n_nodes` nodes.
     """
-    edge_index = torch.cartesian_prod(torch.arange(n_nodes), torch.arange(n_nodes)).T
+    edge_index = torch.cartesian_prod(torch.arange(n_nodes),
+                                      torch.arange(n_nodes)).T
     if not add_self_loops:
         edge_index = edge_index.t()[edge_index[0] != edge_index[1]].t()
 
@@ -24,14 +26,16 @@ def get_fully_connected_edges_in_batch(batch: Tensor,
                                        edge_index: Tensor,
                                        fill_value: float = 0.0,
                                        add_self_loops: bool = False,
-                                       edge_attr: OptTensor = None) -> Tuple[Tensor, Tensor, OptTensor]:
+                                       edge_attr: OptTensor = None) \
+        -> Tuple[Tensor, Tensor, OptTensor]:
     """
     Creates the edge_index in COO format in a fully-connected graph in a batch
     """
 
     # create number of graphs in batch
     # batch_size = len(batch.unique())
-    # batch_num_nodes = torch.zeros(size=(batch_size,), device=batch.device, dtype=batch.dtype)
+    # batch_num_nodes = torch.zeros(size=(batch_size,),
+    #                              device=batch.device, dtype=batch.dtype)
     # ones = torch.ones_like(batch)
     # batch_num_nodes = batch_num_nodes.scatter_add(0, batch, ones)
 
@@ -43,22 +47,26 @@ def get_fully_connected_edges_in_batch(batch: Tensor,
     ptr = torch.cat([zero, ptr])
 
 
-    fc_edge_index = [get_fully_connected_edges(int(n), add_self_loops) + int(p) for n, p in zip(batch_num_nodes, ptr)]
+    fc_edge_index = [get_fully_connected_edges(int(n),
+                                               add_self_loops) + int(p)
+                     for n, p in zip(batch_num_nodes, ptr)]
     fc_edge_index = torch.cat(fc_edge_index, dim=-1)
 
 
-    # create dictionary with string as keys, e.g. [0, 1] meaning the connectivity between source node_id 0 to 1
+    # create dictionary with string as keys, e.g. [0, 1]
+    # meaning the connectivity between source node_id 0 to 1
     # the value of the position along dim=1 of edge_index
-    source_target_to_edge_idx = {str([int(s), int(t)]): i for s, t, i in zip(edge_index[0],
-                                                                             edge_index[1],
-                                                                             range(edge_index.size(1)))}
+    st_eix = {str([int(s), int(t)]): i for s, t, i in zip(edge_index[0],
+                                                          edge_index[1],
+                                                          range(edge_index.size(1)
+                                                                ))}
     # positions of fake edge_index
-    source_target_to_fc_edge_idx = {str([int(s), int(t)]): i for s, t, i in zip(fc_edge_index[0],
-                                                                                fc_edge_index[1],
-                                                                                range(fc_edge_index.size(1)))}
+    st_to_fc_edge_idx = {str([int(s), int(t)]): i for s, t, i in zip(fc_edge_index[0],
+                                                                     fc_edge_index[1],
+                                                                     range(fc_edge_index.size(1)))}
 
-    fake_edges = [s for s in source_target_to_fc_edge_idx.keys() if s not in source_target_to_edge_idx.keys()]
-    fake_edges_ids = [source_target_to_fc_edge_idx[k] for k in fake_edges]
+    fake_edges = [s for s in st_to_fc_edge_idx.keys() if s not in st_eix.keys()]
+    fake_edges_ids = [st_to_fc_edge_idx[k] for k in fake_edges]
 
     E = fc_edge_index.size(-1)
     true_edge_ids = list(set([i for i in range(E)]).difference(set(fake_edges_ids)))
@@ -73,7 +81,8 @@ def get_fully_connected_edges_in_batch(batch: Tensor,
 
     if edge_attr is not None:
         # concatenate/zero-pad the fake edge_attr behind the true edge_attr
-        all_edge_attr = torch.zeros(size=(fc_edge_index.size(1), edge_attr.size(-1)),
+        all_edge_attr = torch.zeros(size=(fc_edge_index.size(1),
+                                          edge_attr.size(-1)),
                                     device=edge_index.device).fill_(fill_value)
         # fill in values from the true edge attr
         all_edge_attr[true_edge_ids] = edge_attr
@@ -180,7 +189,9 @@ class EquivariantConv(MessagePassing):
             edge_index = torch.stack([row, col], dim=0)
 
         if batch is None:
-            batch = torch.zeros([pos.size(0)], device=pos.device, dtype=torch.long)
+            batch = torch.zeros([pos.size(0)],
+                                device=pos.device,
+                                dtype=torch.long)
 
         # create fully-connected graph(s) in batch
         # optional that we might NOT want to use the fully-connected graph, but just the true edge-index as in the
