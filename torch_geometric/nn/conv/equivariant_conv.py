@@ -20,15 +20,32 @@ def get_fully_connected_edges(n_nodes: int, add_self_loops: bool = False) -> Ten
     return edge_index
 
 
-def get_fully_connected_edges_in_batch(batch_num_nodes: Tensor, ptr: Tensor,
+def get_fully_connected_edges_in_batch(batch: Tensor,
                                        edge_index: Tensor,
+                                       fill_value: float = 0.0,
                                        add_self_loops: bool = False,
-                                       edge_attr: OptTensor = None) -> Tuple[Tensor, OptTensor]:
+                                       edge_attr: OptTensor = None) -> Tuple[Tensor, Tensor, OptTensor]:
     """
     Creates the edge_index in COO format in a fully-connected graph in a batch
     """
+
+    # create number of graphs in batch
+    # batch_size = len(batch.unique())
+    # batch_num_nodes = torch.zeros(size=(batch_size,), device=batch.device, dtype=batch.dtype)
+    # ones = torch.ones_like(batch)
+    # batch_num_nodes = batch_num_nodes.scatter_add(0, batch, ones)
+
+    batch_num_nodes = torch.bincount(batch)
+
+    # create pointer (ptr)
+    zero = torch.zeros(size=(1,), dtype=batch.dtype, device=batch.device)
+    ptr = batch_num_nodes.cumsum(dim=0)
+    ptr = torch.cat([zero, ptr])
+
+
     fc_edge_index = [get_fully_connected_edges(int(n), add_self_loops) + int(p) for n, p in zip(batch_num_nodes, ptr)]
     fc_edge_index = torch.cat(fc_edge_index, dim=-1)
+
 
     # create dictionary with string as keys, e.g. [0, 1] meaning the connectivity between source node_id 0 to 1
     # the value of the position along dim=1 of edge_index
@@ -42,23 +59,28 @@ def get_fully_connected_edges_in_batch(batch_num_nodes: Tensor, ptr: Tensor,
 
     fake_edges = [s for s in source_target_to_fc_edge_idx.keys() if s not in source_target_to_edge_idx.keys()]
     fake_edges_ids = [source_target_to_fc_edge_idx[k] for k in fake_edges]
-    # E_fc = fc_edge_index.shape[1]
-    # E = edge_index.shape[1]
-    # assert len(fake_edges) == E_fc - E
-    fake_edge_index = fc_edge_index.t()[fake_edges_ids].t()
 
-    # concatenate behind the fake-edges along the true edge_index
-    all_edge_index = torch.cat([edge_index, fake_edge_index], dim=-1).long().to(edge_index.device)
+    E = fc_edge_index.size(-1)
+    true_edge_ids = list(set([i for i in range(E)]).difference(set(fake_edges_ids)))
+    # create mask where the true edge-indices are placed
+    mask = torch.ones(size=(E,), device=batch.device, dtype=torch.bool)
+    # fill in mask
+    mask[fake_edges_ids] = False
+
+    # print(fc_edge_index)
+    # print(edge_index)
+    # print(mask)
 
     if edge_attr is not None:
         # concatenate/zero-pad the fake edge_attr behind the true edge_attr
-        fake_edge_attr = torch.zeros(size=(fake_edge_index.size(1), edge_attr.size(-1)),
-                                     device=edge_index.device)
-        all_edge_attr = torch.cat([edge_attr, fake_edge_attr], dim=0).to(edge_attr.device)
+        all_edge_attr = torch.zeros(size=(fc_edge_index.size(1), edge_attr.size(-1)),
+                                    device=edge_index.device).fill_(fill_value)
+        # fill in values from the true edge attr
+        all_edge_attr[true_edge_ids] = edge_attr
     else:
         all_edge_attr = None
 
-    return all_edge_index, all_edge_attr
+    return fc_edge_index, mask, all_edge_attr
 
 
 class EquivariantConv(MessagePassing):
@@ -123,13 +145,17 @@ class EquivariantConv(MessagePassing):
                  pos_nn: Optional[Callable] = None,
                  vel_nn: Optional[Callable] = None,
                  global_nn: Optional[Callable] = None,
-                 aggr: str = "add", **kwargs):
+                 aggr: str = "add",
+                 use_fc: bool = True,
+                 **kwargs):
         super(EquivariantConv, self).__init__(aggr=aggr, **kwargs)
 
         self.local_nn = local_nn
         self.pos_nn = pos_nn
         self.vel_nn = vel_nn
         self.global_nn = global_nn
+
+        self.use_fc = use_fc
 
         self.reset_parameters()
 
@@ -142,11 +168,10 @@ class EquivariantConv(MessagePassing):
 
     def forward(self, x: OptTensor,
                 pos: Tensor,
-                edge_index: Adj, vel: OptTensor = None,
-                edge_attr: OptTensor = None,
-                fc_edge_index: OptTensor = None,
-                batch_num_nodes: OptTensor = None,
-                ptr: OptTensor = None
+                edge_index: Adj,
+                vel: OptTensor = None,
+                batch: OptTensor = None,
+                edge_attr: OptTensor = None
                 ) -> Tuple[Tensor, Tuple[Tensor, OptTensor]]:
         """"""
 
@@ -154,22 +179,22 @@ class EquivariantConv(MessagePassing):
             row, col, _ = edge_index.coo()
             edge_index = torch.stack([row, col], dim=0)
 
-        # if fc_edge_index and batch_num_nodes are not provided:
-        # create fully-connected edge-index if not passed
-        # note, then it assumes that the entire batch just consists of ONE graph
-        if batch_num_nodes is None:
-            batch_num_nodes = torch.tensor([pos.size(0)], device=pos.device, dtype=torch.long)
-        if ptr is None:
-            ptr = torch.tensor([0], device=pos.device, dtype=torch.long)
-        if fc_edge_index is None:
-            fc_edge_index, edge_attr = get_fully_connected_edges_in_batch(batch_num_nodes=batch_num_nodes,
-                                                                          ptr=ptr, edge_index=edge_index,
-                                                                          add_self_loops=False,
-                                                                          edge_attr=edge_attr)
+        if batch is None:
+            batch = torch.zeros([pos.size(0)], device=pos.device, dtype=torch.long)
+
+        # create fully-connected graph(s) in batch
+
+        fc_edge_index, mask, edge_attr = get_fully_connected_edges_in_batch(batch=batch,
+                                                                            edge_index=edge_index,
+                                                                            add_self_loops=False,
+                                                                            edge_attr=edge_attr)
 
 
         # propagate_type: (x: OptTensor, pos: Tensor, edge_attr: OptTensor) -> Tuple[Tensor,Tensor] # noqa
-        out_x, out_pos = self.propagate(edge_index=fc_edge_index, orig_index=edge_index[1], x=x, pos=pos,
+        out_x, out_pos = self.propagate(edge_index=fc_edge_index,
+                                        orig_index=edge_index[1],
+                                        edge_mask=mask,
+                                        x=x, pos=pos,
                                         edge_attr=edge_attr, size=None)
 
         out_x = out_x if x is None else torch.cat([x, out_x], dim=1)
@@ -201,9 +226,13 @@ class EquivariantConv(MessagePassing):
         return (msg, pos_msg)
 
     def aggregate(self, inputs: Tuple[Tensor, Tensor],
-                  index: Tensor, orig_index: Tensor) -> Tuple[Tensor, Tensor]:
-        node_aggr_messages = scatter(inputs[0][:len(orig_index)], orig_index, 0, reduce=self.aggr)
-        node_aggr_positional = scatter(inputs[1], index, 0, reduce="mean")
+                  index: Tensor, edge_mask: Tensor) -> Tuple[Tensor, Tensor]:
+
+        msgs_feat = inputs[0].masked_select(edge_mask.view(-1, 1)).view(-1, inputs[0].size(-1))
+        msgs_pos = inputs[1]
+        orig_index = index.masked_select(edge_mask)
+        node_aggr_messages = scatter(msgs_feat, orig_index, 0, reduce=self.aggr)
+        node_aggr_positional = scatter(msgs_pos, index, 0, reduce="mean")
         return (node_aggr_messages, node_aggr_positional)
 
     def update(self, inputs: Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:

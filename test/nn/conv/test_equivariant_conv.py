@@ -8,7 +8,6 @@ def test_equivariant_conv():
     x1 = torch.randn(4, 16)
     pos1 = torch.randn(4, 3)
     vel = torch.randn(4, 3)
-    # edge_index = torch.tensor([[0, 1, 2, 3], [0, 0, 1, 1]])
     edge_index = torch.tensor([[1, 0, 0, 2, 1, 3], [0, 1, 2, 0, 3, 1]])
     row, col = edge_index
     adj = SparseTensor(row=row, col=col, sparse_sizes=(4, 4))
@@ -69,10 +68,12 @@ def test_equivariant_conv_fc():
 
 
     edge_index = torch.tensor([[1, 0, 0, 2, 1, 3], [0, 1, 2, 0, 3, 1]])
-    conv = EquivariantConv(local_nn=None, pos_nn=None, vel_nn=None, global_nn=None)
+    conv = EquivariantConv(local_nn=None, pos_nn=None,
+                           vel_nn=None, global_nn=None)
     assert sum(m.numel() for m in conv.parameters()) == 0
 
-    out = conv(x=None, pos=pos, edge_index=edge_index, vel=None, edge_attr=None)
+    out = conv(x=None, pos=pos, vel=None,
+               edge_index=edge_index, batch=None, edge_attr=None)
 
     x_feat = out[0]
     pos_feat = out[1][0]
@@ -82,15 +83,13 @@ def test_equivariant_conv_fc():
 
 
     # get fully-connected messages.
-    # graph has N=4 nodes, so in-total (N*(N-1)/2) = 6 messages, as no self-loops are considered
-    m01 = m10 = euclid_dist_unidim(pos[0].item(), pos[1].item())
-    m02 = m20 = euclid_dist_unidim(pos[0].item(), pos[2].item())
-    m03 = m30 = euclid_dist_unidim(pos[0].item(), pos[3].item())
+    # graph has N=4 nodes, so in-total (N*(N-1)/2) = 6 messages,
+    # as no self-loops are considered
+    m01 = euclid_dist_unidim(pos[0].item(), pos[1].item())
+    m02 = euclid_dist_unidim(pos[0].item(), pos[2].item())
 
-    m12 = m21 = euclid_dist_unidim(pos[1].item(), pos[2].item())
-    m13 = m31 = euclid_dist_unidim(pos[1].item(), pos[3].item())
+    m13 = euclid_dist_unidim(pos[1].item(), pos[3].item())
 
-    m23 = m32 = euclid_dist_unidim(pos[2].item(), pos[3].item())
 
     # get hidden embedding `h`, based on local neighbourhood.
     h0 = m02 + m01
@@ -123,3 +122,4 @@ def test_equivariant_conv_fc():
                                       ])
 
     assert torch.allclose(pos_feat, torch.Tensor([[x0], [x1], [x2], [x3]]))
+
