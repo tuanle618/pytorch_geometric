@@ -183,16 +183,20 @@ class EquivariantConv(MessagePassing):
             batch = torch.zeros([pos.size(0)], device=pos.device, dtype=torch.long)
 
         # create fully-connected graph(s) in batch
-
-        fc_edge_index, mask, edge_attr = get_fully_connected_edges_in_batch(batch=batch,
-                                                                            edge_index=edge_index,
-                                                                            add_self_loops=False,
-                                                                            edge_attr=edge_attr)
+        # optional that we might NOT want to use the fully-connected graph, but just the true edge-index as in the
+        # previous pull-request -> could be preferred, if the graphs are really large and we just want to maintain
+        # using the positional updates equation but with the LOCAL neighbourhood only.
+        if self.use_fc:
+            edge_index, mask, edge_attr = get_fully_connected_edges_in_batch(batch=batch,
+                                                                             edge_index=edge_index,
+                                                                             add_self_loops=False,
+                                                                             edge_attr=edge_attr)
+        else:
+            mask = torch.ones(edge_index.size(1), dtype=torch.bool, device=edge_index.device)
 
 
         # propagate_type: (x: OptTensor, pos: Tensor, edge_attr: OptTensor) -> Tuple[Tensor,Tensor] # noqa
-        out_x, out_pos = self.propagate(edge_index=fc_edge_index,
-                                        orig_index=edge_index[1],
+        out_x, out_pos = self.propagate(edge_index=edge_index,
                                         edge_mask=mask,
                                         x=x, pos=pos,
                                         edge_attr=edge_attr, size=None)
